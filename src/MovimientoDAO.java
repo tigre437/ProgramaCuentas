@@ -7,12 +7,13 @@ import java.util.Locale;
 
 public class MovimientoDAO {
     public static void agregarMovimiento(Movimiento m) {
-        String sql = "INSERT INTO movimientos(tipo, cantidad, descripcion, fecha) VALUES (?, ?, ?, ?)";
+        String sql = "INSERT INTO movimientos(tipo, cantidad, descripcion, fecha, archivo) VALUES (?, ?, ?, ?, ?)";
         try (Connection conn = Database.connect(); PreparedStatement pstmt = conn.prepareStatement(sql)) {
             pstmt.setString(1, m.getTipo());
             pstmt.setDouble(2, m.getCantidad());
             pstmt.setString(3, m.getDescripcion());
             pstmt.setString(4, m.getFecha());
+            pstmt.setString(5, m.getArchivo()); // ✅ ahora guarda el nombre del archivo
             pstmt.executeUpdate();
 
             LogDAO.agregarLog("Movimiento Nuevo: " + m.getTipo() + " " + m.getCantidad());
@@ -20,6 +21,7 @@ public class MovimientoDAO {
             e.printStackTrace();
         }
     }
+
 
     public static void actualizarMovimiento(int id, String tipo, double cantidad, String descripcion) {
         String sql = "UPDATE movimientos SET tipo=?, cantidad=?, descripcion=? WHERE id=?";
@@ -46,16 +48,20 @@ public class MovimientoDAO {
 
     public static List<Movimiento> listarMovimientos() {
         List<Movimiento> lista = new ArrayList<>();
-        String sql = "SELECT * FROM movimientos ORDER BY fecha DESC";
+        String sql = "SELECT id, tipo, cantidad, descripcion, fecha, archivo FROM movimientos ORDER BY fecha DESC";
 
-        try (Connection conn = Database.connect(); Statement stmt = conn.createStatement(); ResultSet rs = stmt.executeQuery(sql)) {
+        try (Connection conn = Database.connect();
+             Statement stmt = conn.createStatement();
+             ResultSet rs = stmt.executeQuery(sql)) {
+
             while (rs.next()) {
                 lista.add(new Movimiento(
                         rs.getInt("id"),
                         rs.getString("tipo"),
                         rs.getDouble("cantidad"),
                         rs.getString("descripcion"),
-                        rs.getString("fecha")
+                        rs.getString("fecha"),
+                        rs.getString("archivo") // ✅ ahora lo carga correctamente
                 ));
             }
         } catch (SQLException e) {
@@ -64,6 +70,7 @@ public class MovimientoDAO {
 
         return lista;
     }
+
 
     public static double obtenerSaldo() {
         String sql = "SELECT valor FROM saldo WHERE id = 1";
@@ -139,5 +146,35 @@ public class MovimientoDAO {
         }
         return false;
     }
+
+
+    public static void actualizarArchivo(int id, String archivo) {
+        String sql = "UPDATE movimientos SET archivo = ? WHERE id = ?";
+        try (Connection conn = Database.connect();
+             PreparedStatement ps = conn.prepareStatement(sql)) {
+            ps.setString(1, archivo);
+            ps.setInt(2, id);
+            ps.executeUpdate();
+        } catch (SQLException e) {
+            e.printStackTrace();
+        }
+    }
+
+    public static int obtenerUltimoId() {
+        String sql = "SELECT MAX(id) FROM movimientos";
+        try (Connection conn = Database.connect();
+             Statement st = conn.createStatement();
+             ResultSet rs = st.executeQuery(sql)) {
+            if (rs.next()) {
+                return rs.getInt(1);
+            }
+        } catch (SQLException e) {
+            e.printStackTrace();
+        }
+        return -1;
+    }
+
+
+
 
 }

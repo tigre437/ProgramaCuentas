@@ -14,7 +14,8 @@ public class Database {
             tipo TEXT NOT NULL,
             cantidad REAL NOT NULL,
             descripcion TEXT,
-            fecha TEXT NOT NULL
+            fecha TEXT NOT NULL,
+            archivo TEXT
         );
     """;
 

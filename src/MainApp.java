@@ -9,11 +9,19 @@ import javafx.geometry.Pos;
 import javafx.scene.Scene;
 import javafx.scene.control.*;
 import javafx.scene.layout.*;
+import javafx.stage.FileChooser;
 import javafx.stage.Stage;
 
+import java.io.File;
+import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
+import java.nio.file.StandardCopyOption;
 import java.text.NumberFormat;
 import java.text.ParseException;
 import java.time.LocalDate;
+import java.util.Arrays;
 import java.util.Locale;
 import java.util.Objects;
 import java.util.Optional;
@@ -53,6 +61,29 @@ public class MainApp extends Application {
         descripcionField.setPrefSize(200, 50);
         descripcionField.setStyle("-fx-font-size: 20px;");
 
+        Button btnAdjuntar = new Button("Adjuntar archivo");
+        btnAdjuntar.setPrefSize(200, 50);
+        btnAdjuntar.setStyle("-fx-font-size: 20px;");
+
+
+        final File[] archivoSeleccionado = {null};
+
+        btnAdjuntar.setOnAction(_ -> {
+            FileChooser fileChooser = new FileChooser();
+            fileChooser.setTitle("Seleccionar archivo");
+            fileChooser.getExtensionFilters().addAll(
+                    new FileChooser.ExtensionFilter("Todos los archivos", "*.*"),
+                    new FileChooser.ExtensionFilter("Imágenes", "*.jpg", "*.jpeg", "*.png"),
+                    new FileChooser.ExtensionFilter("PDF", "*.pdf")
+            );
+            File file = fileChooser.showOpenDialog(stage);
+            if (file != null) {
+                archivoSeleccionado[0] = file;
+            }
+        });
+
+
+
         Button btnAgregar = new Button("Añadir");
         btnAgregar.setDefaultButton(true);
         btnAgregar.setPrefSize(140, 50);
@@ -64,8 +95,35 @@ public class MainApp extends Application {
                 String desc = descripcionField.getText();
                 String fecha = LocalDate.now().toString();
 
-                Movimiento m = new Movimiento(tipo, cantidad, desc, fecha);
+
+                String archivoNombre = (archivoSeleccionado[0] != null) ? archivoSeleccionado[0].getName() : null;
+                Movimiento m = new Movimiento(tipo, cantidad, desc, fecha, archivoNombre);
                 MovimientoDAO.agregarMovimiento(m);
+
+
+                // Si el usuario adjuntó un archivo
+                if (archivoSeleccionado[0] != null) {
+                    try {
+                        // Crear carpeta si no existe
+                        Path carpetaAdjuntos = Paths.get("data/adjuntos");
+                        if (!Files.exists(carpetaAdjuntos)) {
+                            Files.createDirectories(carpetaAdjuntos);
+                        }
+
+                        // Nombre de archivo único con el ID del movimiento (una vez insertado)
+                        int idMovimiento = MovimientoDAO.obtenerUltimoId(); // deberás tener este método en el DAO
+                        String nombreArchivo = idMovimiento + "_" + archivoSeleccionado[0].getName();
+
+                        Path destino = carpetaAdjuntos.resolve(nombreArchivo);
+                        Files.copy(archivoSeleccionado[0].toPath(), destino, StandardCopyOption.REPLACE_EXISTING);
+
+                        MovimientoDAO.actualizarArchivo(idMovimiento, nombreArchivo);
+                        archivoSeleccionado[0] = null;
+                    } catch (IOException e) {
+                        showError("Error al guardar el archivo adjunto");
+                    }
+                }
+
 
                 // Actualizar saldo acumulado
                 double saldoActual = MovimientoDAO.obtenerSaldo();
@@ -86,7 +144,7 @@ public class MainApp extends Application {
         formGrid.setHgap(10);
         formGrid.setVgap(10);
         formGrid.setAlignment(Pos.CENTER);
-        formGrid.addRow(0, tipoBox, cantidadField, descripcionField, btnAgregar);
+        formGrid.addRow(0, tipoBox, cantidadField, descripcionField, btnAdjuntar, btnAgregar);
 
         // === BOTONES DE ACCIÓN ===
         Button btnEditar = new Button("Editar");
@@ -152,16 +210,125 @@ public class MainApp extends Application {
         TableColumn<Movimiento, String> colTipo = new TableColumn<>("Tipo");
         colTipo.setCellValueFactory(d -> new javafx.beans.property.SimpleStringProperty(d.getValue().getTipo()));
         colTipo.prefWidthProperty().bind(tablaMovimientos.widthProperty().multiply(0.10));
+
         TableColumn<Movimiento, String> colCantidad = new TableColumn<>("Cantidad");
         colCantidad.setCellValueFactory(d -> new javafx.beans.property.SimpleStringProperty(nf.format(d.getValue().getCantidad())));
         colCantidad.prefWidthProperty().bind(tablaMovimientos.widthProperty().multiply(0.15));
+
         TableColumn<Movimiento, String> colDescripcion = new TableColumn<>("Descripción");
         colDescripcion.setCellValueFactory(d -> new javafx.beans.property.SimpleStringProperty(d.getValue().getDescripcion()));
-        colDescripcion.prefWidthProperty().bind(tablaMovimientos.widthProperty().multiply(0.60));
+        colDescripcion.prefWidthProperty().bind(tablaMovimientos.widthProperty().multiply(0.45));
+
         TableColumn<Movimiento, String> colFecha = new TableColumn<>("Fecha");
         colFecha.setCellValueFactory(d -> new javafx.beans.property.SimpleStringProperty(d.getValue().getFecha()));
         colFecha.prefWidthProperty().bind(tablaMovimientos.widthProperty().multiply(0.15));
-        tablaMovimientos.getColumns().addAll(colTipo, colCantidad, colDescripcion, colFecha);
+
+        TableColumn<Movimiento, Void> colArchivo = new TableColumn<>("Archivo");
+        colArchivo.prefWidthProperty().bind(tablaMovimientos.widthProperty().multiply(0.20)); // algo más ancho
+
+        colArchivo.setCellFactory(col -> new TableCell<>() {
+            private final Button btnAbrir = new Button("\uD83D\uDD0D");
+            private final Button btnCambiar = new Button("📎");
+            private final Button btnBorrar = new Button("❌");
+            private final HBox contenedor = new HBox(5, btnAbrir, btnCambiar, btnBorrar);
+
+            {
+                contenedor.setAlignment(Pos.CENTER);
+
+                // === ABRIR ===
+                btnAbrir.setOnAction(_ -> {
+                    Movimiento mov = getTableView().getItems().get(getIndex());
+                    if (mov.getArchivo() == null || mov.getArchivo().isEmpty()) {
+                        showError("Este movimiento no tiene archivo adjunto.");
+                        return;
+                    }
+
+                    Path archivo = Paths.get("data/adjuntos", mov.getArchivo());
+                    if (!Files.exists(archivo)) {
+                        showError("El archivo no existe: " + archivo);
+                        return;
+                    }
+
+                    try {
+                        java.awt.Desktop.getDesktop().open(archivo.toFile());
+                    } catch (IOException e) {
+                        showError("No se pudo abrir el archivo.");
+                    }
+                });
+
+                // === CAMBIAR ===
+                btnCambiar.setOnAction(_ -> {
+                    Movimiento mov = getTableView().getItems().get(getIndex());
+
+                    FileChooser fileChooser = new FileChooser();
+                    fileChooser.setTitle("Seleccionar nuevo archivo");
+                    fileChooser.getExtensionFilters().addAll(
+                            new FileChooser.ExtensionFilter("Todos los archivos", "*.*"),
+                            new FileChooser.ExtensionFilter("Imágenes", "*.jpg", "*.jpeg", "*.png"),
+                            new FileChooser.ExtensionFilter("PDF", "*.pdf")
+                    );
+                    File nuevoArchivo = fileChooser.showOpenDialog(getScene().getWindow());
+                    if (nuevoArchivo != null) {
+                        try {
+                            Path carpetaAdjuntos = Paths.get("data/adjuntos");
+                            if (!Files.exists(carpetaAdjuntos)) {
+                                Files.createDirectories(carpetaAdjuntos);
+                            }
+
+                            String nombreArchivoNuevo = mov.getId() + "_" + nuevoArchivo.getName();
+                            Path destino = carpetaAdjuntos.resolve(nombreArchivoNuevo);
+                            Files.copy(nuevoArchivo.toPath(), destino, StandardCopyOption.REPLACE_EXISTING);
+
+                            MovimientoDAO.actualizarArchivo(mov.getId(), nombreArchivoNuevo);
+                            actualizarTablas();
+
+                        } catch (IOException e) {
+                            showError("Error al cambiar el archivo adjunto.");
+                        }
+                    }
+                });
+
+                // === BORRAR ===
+                btnBorrar.setOnAction(_ -> {
+                    Movimiento mov = getTableView().getItems().get(getIndex());
+                    if (mov.getArchivo() == null || mov.getArchivo().isEmpty()) {
+                        showError("No hay archivo que borrar.");
+                        return;
+                    }
+
+                    Path archivo = Paths.get("data/adjuntos", mov.getArchivo());
+                    Alert confirm = new Alert(Alert.AlertType.CONFIRMATION,
+                            "¿Borrar el archivo adjunto "+ mov.getArchivo() +" de este movimiento?",
+                            ButtonType.YES, ButtonType.NO);
+                    Optional<ButtonType> res = confirm.showAndWait();
+
+                    if (res.isPresent() && res.get() == ButtonType.YES) {
+                        try {
+                            Files.deleteIfExists(archivo);
+                            MovimientoDAO.actualizarArchivo(mov.getId(), null);
+                            actualizarTablas();
+                        } catch (IOException e) {
+                            showError("Error al borrar el archivo.");
+                        }
+                    }
+                });
+            }
+
+            @Override
+            protected void updateItem(Void item, boolean empty) {
+                super.updateItem(item, empty);
+                if (empty) {
+                    setGraphic(null);
+                } else {
+                    setGraphic(contenedor);
+                }
+            }
+        });
+        colArchivo.prefWidthProperty().bind(tablaMovimientos.widthProperty().multiply(0.15));
+
+
+        tablaMovimientos.getColumns().addAll(colTipo, colCantidad, colDescripcion, colFecha, colArchivo);
+
 
 // === TABLA DE LOGS ===
         tablaLogs = new TableView<>();
@@ -186,6 +353,24 @@ public class MainApp extends Application {
             int cmp = LocalDate.parse(m2.getFecha()).compareTo(LocalDate.parse(m1.getFecha())); // fecha descendente
             if (cmp == 0) return Integer.compare(m2.getId(), m1.getId()); // id descendente
             return cmp;
+        });
+
+        tablaMovimientos.setRowFactory(tv -> new TableRow<>() {
+            @Override
+            protected void updateItem(Movimiento item, boolean empty) {
+                super.updateItem(item, empty);
+                if (item == null || empty) {
+                    setStyle(""); // fila vacía o nula, sin estilo
+                } else {
+                    // Colores según tipo de movimiento
+                    switch (item.getTipo()) {
+                        case "Ingreso" -> setStyle("-fx-background-color: #C8E6C9;");  // verde claro
+                        case "Gasto" -> setStyle("-fx-background-color: #FFCDD2;");    // rojo claro
+                        case "Ajuste" -> setStyle("-fx-background-color: #FFF9C4;");   // amarillo claro
+                        default -> setStyle("");
+                    }
+                }
+            }
         });
 
         tablaMovimientos.setItems(ordenados);
@@ -345,7 +530,7 @@ public class MainApp extends Application {
                         showError("La cantidad debe ser mayor que 0");
                         return null;
                     }
-                    return new Movimiento(seleccionado.getId(), tipoField.getValue(), cantidad, descField.getText(), seleccionado.getFecha());
+                    return new Movimiento(seleccionado.getId(), tipoField.getValue(), cantidad, descField.getText(), seleccionado.getFecha(), seleccionado.getArchivo());
                 } catch (ParseException e) {
                     showError("Cantidad no válida");
                     return null;
